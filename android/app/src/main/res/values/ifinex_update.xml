@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- v2.1 in-app updater. The GitHub workflow replaces OWNER/REPO with the repository that builds this app (see Setup Guide, "Automatic updates").
+         Building on your own computer instead? Type your repo here once, e.g. SquadSplit/ifinex-cloud-apk (the repo must be PUBLIC). -->
+    <string name="ifinex_update_repo" translatable="false">OWNER/REPO</string>
+    <!-- picks the right .apk when (legacy) one release holds several apps: the file name must contain this word -->
+    <string name="ifinex_update_edition" translatable="false">app</string>
+</resources>
