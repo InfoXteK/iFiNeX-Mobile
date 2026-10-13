@@ -1,0 +1,164 @@
+name: Build iFiNeX APK
+
+# Runs on every push to main/master, when you press "Run workflow", and when sync-web.yml finds a new website version.
+# 1) BUILD   : compiles the APK, signs it with YOUR permanent key (secret IFX_DEBUG_KEYSTORE_B64), uploads it as a download ("Artifacts").
+# 2) RELEASE : publishes it as a GitHub Release (tag v<versionName>). The iFiNeX app looks at that Release (☰ → Check for updates).
+#    The release job uses the "ifinex-release" environment: add yourself as "Required reviewer" there if you want to tap Approve before anything is published.
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths-ignore: [ "**.md", "tools/**" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      edition: ${{ steps.meta.outputs.edition }}
+      asset:   ${{ steps.meta.outputs.asset }}
+      signed:  ${{ steps.key.outputs.signed }}
+      cert:    ${{ steps.fp.outputs.cert }}
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17 Development Kit
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Read the app's version and edition
+        id: meta
+        run: |
+          VER=$(grep -m1 'versionName' android/app/build.gradle | sed -E 's/.*"([^"]+)".*/\1/')
+          APPID=$(grep -m1 'applicationId' android/app/build.gradle | sed -E 's/.*"([^"]+)".*/\1/')
+          ED=app
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "edition=$ED" >> "$GITHUB_OUTPUT"
+          echo "asset=iFiNeX-$ED-v$VER.apk" >> "$GITHUB_OUTPUT"
+          echo "Building $ED edition, version $VER ($APPID)"
+
+      # The app must know which repository publishes its updates, and Android only accepts an update with a HIGHER versionCode.
+      # versionCode = minutes since 1970 -> always larger than the previous build, even if you ever recreate this repository.
+      - name: Point the in-app updater at this repository + set a rising versionCode
+        run: |
+          sed -i "s#OWNER/REPO#${GITHUB_REPOSITORY}#" android/app/src/main/res/values/ifinex_update.xml
+          sed -i -E "s/versionCode [0-9]+/versionCode $(( $(date +%s) / 60 ))/" android/app/build.gradle
+          grep -n "ifinex_update_repo" android/app/src/main/res/values/ifinex_update.xml
+          grep -n "versionCode" android/app/build.gradle
+
+      # Android only installs an update that is signed with the SAME key as the installed app.
+      # A GitHub runner is brand new every time, so without your saved key every build would get a different random key and phones would refuse the update.
+      - name: Use your permanent signing key
+        id: key
+        env:
+          KS_B64: ${{ secrets.IFX_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KS_B64" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::error title=NO PERMANENT SIGNING KEY::Secret IFX_DEBUG_KEYSTORE_B64 is missing. This APK gets a RANDOM key, so Android will demand you UNINSTALL the old app first (and you lose offline data). It is NOT published as an update. Fix once: Setup Guide, Signing key."
+            { echo "## ❌ NO PERMANENT SIGNING KEY"; echo; echo "This build used a random one-time key. **Android will refuse to update over your installed app** (\"uninstall first\") and nothing was published."; echo; echo "Fix it once (10 minutes): run \`tools/make-signing-key.ps1\` (Windows) or \`tools/make-signing-key.sh\` (Mac/Linux), paste the result into Settings → Secrets and variables → Actions → New repository secret → **IFX_DEBUG_KEYSTORE_B64**, then run this workflow again."; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            mkdir -p "$HOME/.android"
+            printf '%s' "$KS_B64" | base64 -d > "$HOME/.android/debug.keystore"
+            chmod 600 "$HOME/.android/debug.keystore"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Signing certificate fingerprint (must be the same on every build):"
+            keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android 2>/dev/null | grep -i -E "androiddebugkey|SHA" || true
+          fi
+
+      # Standard Capacitor project: package.json is at the repo root. npm installs the plugins, "cap sync" copies www/ into the Android project and wires the plugins into Gradle.
+      - name: Install packages (npm ci)
+        run: npm ci --no-audit --no-fund
+
+      - name: Copy the website + plugins into the Android project (cap sync)
+        run: npx cap sync android
+
+      - name: Compile Debug APK with Gradle
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Read the signing certificate of the built APK
+        id: fp
+        run: |
+          AS=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          CERT=$("$AS" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | grep -m1 "certificate SHA-256 digest" | sed -E 's/.*: *//')
+          echo "cert=$CERT" >> "$GITHUB_OUTPUT"
+          echo "Signing certificate SHA-256: $CERT"
+          { echo "### Signing certificate"; echo "\`$CERT\`"; echo; echo "This must be **identical on every build**. If it changes, phones refuse the update."; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Name the APK and write its checksum
+        env:
+          ASSET: ${{ steps.meta.outputs.asset }}
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/$ASSET"
+          (cd dist && sha256sum "$ASSET" > "$ASSET.sha256" && cat "$ASSET.sha256")
+
+      - name: Upload compiled APK artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.key.outputs.signed == 'true' && 'iFiNeX-apk' || 'iFiNeX-apk-TEMPORARY-KEY-do-not-use-for-updates' }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: needs.build.outputs.signed == 'true'
+    runs-on: ubuntu-24.04
+    environment: ifinex-release
+    permissions:
+      contents: write
+    steps:
+      - name: Download the built APK
+        uses: actions/download-artifact@v5
+        with:
+          name: iFiNeX-apk
+          path: dist
+
+      - name: Refuse to publish if the signing key changed since the last release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CERT: ${{ needs.build.outputs.cert }}
+        run: |
+          PREV=$(gh release view --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -m1 -o "Signing certificate SHA-256: [0-9A-Fa-f]*" | sed 's/.*: //' || true)
+          if [ -n "$PREV" ] && [ "${PREV,,}" != "${CERT,,}" ]; then
+            echo "::error title=Signing key changed::Last release was signed with $PREV, this build with $CERT. Phones would refuse this update, so it is NOT published. Put the ORIGINAL key back into IFX_DEBUG_KEYSTORE_B64."
+            exit 1
+          fi
+          echo "Key check OK (previous: ${PREV:-none yet})"
+
+      - name: Publish (or refresh) the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CERT: ${{ needs.build.outputs.cert }}
+          VER: ${{ needs.build.outputs.version }}
+          ED: ${{ needs.build.outputs.edition }}
+          ASSET: ${{ needs.build.outputs.asset }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          TAG="v$VER"
+          printf 'iFiNeX %s edition v%s\n\n%s\n\nBuilt by GitHub Actions from commit %s.\n\nSigning certificate SHA-256: %s\n' "$ED" "$VER" "${COMMIT_MSG:-Manual build}" "${GITHUB_SHA:0:7}" "$CERT" > notes.txt
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "dist/$ASSET" "dist/$ASSET.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "dist/$ASSET" "dist/$ASSET.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "iFiNeX $ED v$VER" --notes-file notes.txt --latest
+          fi
+          echo "Published $TAG"
