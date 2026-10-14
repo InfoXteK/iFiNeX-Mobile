@@ -14,3 +14,9 @@ ios/DerivedData/
 .DS_Store
 *.keystore
 *.jks
+
+# signing material - NEVER commit
+signing.properties
+ifinex-keys/
+GITHUB_SECRET_*.txt
+*.p12
