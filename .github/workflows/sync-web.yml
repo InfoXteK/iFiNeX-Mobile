@@ -1,16 +1,23 @@
 name: Sync website into the app
 
-# Every night (and when you press "Run workflow") this looks at your website repository. If the website changed, it copies the new
-# files into the app, raises the app's patch version (2.1.0 -> 2.1.1), saves that, and starts "Build iFiNeX APK" -> a new Release
-# appears -> the app shows "update available". Nothing changed on the website = nothing happens.
+# The app contains a copy of the website (folder www/). This workflow keeps that copy equal to your WEBSITE repository:
+#   * every 30 minutes (GitHub may delay a scheduled run by some minutes), and
+#   * immediately, when the website repository tells it (optional, see "Instant" in the Signing Key & Auto-Update Guide), and
+#   * when you press  Actions > Sync website into the app > Run workflow.
+# If the website changed: new files are copied into www/, the app's patch version goes up (2.5.0 -> 2.5.1), the change is saved,
+# and "Build iFiNeX APK" starts -> a new Release appears -> the app shows "update available". Nothing changed = nothing happens.
 on:
   schedule:
-    - cron: "17 3 * * *"        # 03:17 UTC = 07:17 Dubai
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
   actions: write
+
+concurrency:
+  group: sync-web
+  cancel-in-progress: false
 
 env:
   WEB_REPO: SquadSplit/Squadsplit.github.io     # the repository GitHub Pages serves your website from (must be public)
@@ -35,7 +42,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Sync website into app -> v$NEWVER [skip ci]"
+          git commit -m "Website update -> app v$NEWVER [skip ci]"
           git push
 
       - name: Start the build
@@ -44,3 +51,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REF: ${{ github.ref_name }}
         run: gh workflow run build-apk.yml --repo "$GITHUB_REPOSITORY" --ref "$REF"
+
+      # GitHub switches scheduled workflows OFF after 60 days without any commit in a public repository. One tiny commit every ~45 days prevents that.
+      - name: Keep the schedule alive
+        if: steps.sync.outputs.changed != 'true'
+        run: |
+          LAST=$(git log -1 --format=%ct); NOW=$(date +%s)
+          if [ $((NOW - LAST)) -gt $((45 * 86400)) ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Keep scheduled sync alive [skip ci]"
+            git push
+          fi
