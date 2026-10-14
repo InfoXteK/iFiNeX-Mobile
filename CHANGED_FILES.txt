@@ -1,0 +1,28 @@
+CHANGED (15):
+.github/workflows/build-apk.yml
+.github/workflows/sync-web.yml
+.gitignore
+README.md
+android/app/build.gradle
+android/app/src/main/java/io/github/squadsplit/app/IfinexUpdatePlugin.java
+android/app/src/main/res/values/ifinex_update.xml
+package.json
+tools/build-android-local.ps1
+tools/build-android-local.sh
+tools/sync-web.sh
+www/bill-tracker.html
+www/ifinex-update.js
+www/ifinex-version.json
+www/squad.html
+
+NEW (6):
+android/app/ifinex-signing.gradle
+tools/SIGNING_KEY_create.bat
+tools/SIGNING_KEY_create.sh
+tools/SIGNING_KEY_show.bat
+tools/SIGNING_KEY_show.sh
+tools/signing-key.js
+
+NO LONGER IN THE PROJECT (delete from GitHub if present) (2):
+tools/make-signing-key.ps1
+tools/make-signing-key.sh

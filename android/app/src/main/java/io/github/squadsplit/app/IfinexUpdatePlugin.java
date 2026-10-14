@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  * v2.1 in-app updater.   JS bridge: window.Capacitor.Plugins.IfinexUpdater   (Android only)
  *
  *   info()      -> installed versionName / versionCode / package / update repo
- *   check()     -> asks GitHub "latest release" of the repo that BUILDS this app and says if it is newer
+ *   check()     -> asks GitHub "latest release" of the repo that BUILDS this app and says if it is newer (build number in the APK file name > installed versionCode)
  *   download()  -> downloads that release's .apk into the app cache, VERIFIES it (see below), emits "progress" events
  *   install()   -> hands the verified file to Android's package installer (the user taps Install)
  *
@@ -127,6 +127,15 @@ public class IfinexUpdatePlugin extends Plugin {
         return 0;
     }
 
+    private static final Pattern BUILD = Pattern.compile("-b([0-9]{1,10})\\.apk$", Pattern.CASE_INSENSITIVE);
+
+    /** "iFiNeX-app-v2.5.0-b29865123.apk" -> 29865123 ; 0 when the name carries no build number */
+    static long buildOf(String assetName) {
+        java.util.regex.Matcher m = BUILD.matcher(assetName == null ? "" : assetName);
+        if (!m.find()) return 0;
+        try { return Long.parseLong(m.group(1)); } catch (Exception e) { return 0; }
+    }
+
     private static String hex(byte[] b) {
         StringBuilder sb = new StringBuilder();
         for (byte v : b) sb.append(String.format("%02x", v));
@@ -196,6 +205,10 @@ public class IfinexUpdatePlugin extends Plugin {
             o.put("repo", res("ifinex_update_repo", ""));
             o.put("edition", res("ifinex_update_edition", ""));
             o.put("canInstall", Build.VERSION.SDK_INT < 26 || ctx().getPackageManager().canRequestPackageInstalls());
+            try { // which key signed the INSTALLED app (must equal the "Signing certificate SHA-256" in every GitHub Release note)
+                java.util.TreeSet<String> sg = new java.util.TreeSet<>(signers(installed(signFlag())));
+                o.put("certSha256", sg.isEmpty() ? "" : sg.first());
+            } catch (Throwable t) { o.put("certSha256", ""); }
             call.resolve(o);
         } catch (Exception e) { call.reject("info_failed: " + e.getMessage()); }
     }
@@ -233,13 +246,19 @@ public class IfinexUpdatePlugin extends Plugin {
             if (!edition.isEmpty() && n.toLowerCase(Locale.ROOT).contains(edition)) pick = a;
         }
         if (pick == null && apks == 1) pick = only;
-        boolean newer = compare(tag, me.versionName) > 0;
+        // every build gets its own number (minutes since 1970) that is part of the file name:  iFiNeX-app-v2.5.0-b29865123.apk
+        // -> a bug-fix build with the same versionName is still offered. Older releases without it fall back to comparing version names.
+        long releaseBuild = pick == null ? 0 : buildOf(pick.optString("name", ""));
+        long myCode = codeOf(me);
+        boolean newer = releaseBuild > 0 ? releaseBuild > myCode : compare(tag, me.versionName) > 0;
 
         JSObject o = new JSObject();
         o.put("ok", true);
         o.put("installedVersion", me.versionName);
         o.put("tag", tag);
-        o.put("version", tag.startsWith("v") || tag.startsWith("V") ? tag.substring(1) : tag);
+        o.put("version", tag.replaceFirst("^[vV]", "").replaceFirst("(?i)-b[0-9]+$", ""));
+        o.put("build", releaseBuild);
+        o.put("installedBuild", myCode);
         o.put("newer", newer && pick != null);
         o.put("hasApk", pick != null);
         String notes = r.optString("body", "");
