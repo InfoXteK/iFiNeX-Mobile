@@ -4,6 +4,15 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $root 'package.json'))) { Write-Host "ERROR: package.json not found in $root. This script must stay inside the 'tools' folder of the iFiNeX project." -ForegroundColor Red; Read-Host 'Press Enter'; exit 1 }
 Set-Location $root
+# Windows treats  &  ^  %  !  in a folder path as command characters: npm/npx then break in confusing ways ("'...\.bin\' is not recognized", "Cannot find module ...@capacitor\cli").
+if ($root -match '[&^%!]') {
+  Write-Host "`nSTOP - the project folder path contains a character that breaks npm on Windows:" -ForegroundColor Red
+  Write-Host "  $root" -ForegroundColor Red
+  Write-Host "The characters  &  ^  %  !  must not be in ANY folder name of the path ('&' means 'run another command' in Windows)." -ForegroundColor Yellow
+  Write-Host "FIX: close this window, MOVE or rename the project folder to something plain, e.g.  D:\ifinex-app  (letters, digits, - and _ only), then double-click build-android-local.bat again." -ForegroundColor Yellow
+  Read-Host 'Press Enter'; exit 1
+}
+if ($root -match '[() ]') { Write-Host "Note: the path has spaces or brackets. It usually works, but if you see odd errors move the folder to a plain path like D:\ifinex-app." -ForegroundColor DarkYellow }
 Write-Host "Project folder: $root"
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Write-Host "Node.js is not installed. Install the LTS version from https://nodejs.org (Next, Next, Finish), then run this again." -ForegroundColor Red; Read-Host 'Press Enter'; exit 1 }
 
