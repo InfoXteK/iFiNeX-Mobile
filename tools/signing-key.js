@@ -146,7 +146,7 @@ function writeSecrets(p) {
 
 async function walk(secrets) {
   say('\nNow put the key into GitHub (needed ONCE, so GitHub signs with the same key as your PC):');
-  say('  1. Open  https://github.com/SquadSplit/iFiNeX-V2.4.0-Mobile/settings/secrets/actions   (log in to GitHub first)');
+  say('  1. Open  https://github.com/SquadSplit/iFiNeX-Mobile/settings/secrets/actions   (log in to GitHub first)');
   say('  2. Click the green button  "New repository secret"  - once for each secret below.');
   hr();
   for (let i = 0; i < secrets.length; i++) {
