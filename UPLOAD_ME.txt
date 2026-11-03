@@ -1,0 +1,5 @@
+iFiNeX app 3.0.0 — ONLY the files that changed since the v2.11 app (repo SquadSplit/iFiNeX-Mobile / your Android Studio project root).
+Copy each file to the same path (replace). Folders: android/... and www/...
+android: app/build.gradle (3.0.0), AndroidManifest.xml, IfinexUpdatePlugin.java (in-app updater + openInBrowser), IfinexNotifierPlugin.java (battery button), package.json
+www: bill-tracker.html, squad.html, ifinex-budget.js, ifinex-config.js, ifinex-tools.js, ifinex-update.js, ifinex-version.json, NEW ifinex-fast.js, ifinex-lifecycle.js, ifinex-reports.js
+Then build the APK (GitHub Actions or Android Studio) with your usual signing key and install it once by hand.
